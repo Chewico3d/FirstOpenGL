@@ -2,84 +2,19 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
-#include <string>
-#include <fstream>
-#include <sstream>
+#include "abs/VertexBuffer.h"
+#include "abs/IndexBuffer.h"
+#include "abs/VerexBufferLayout.h"
+#include "abs/VertexArray.h"
+#include "abs/Shader.h"
+#include "Renderer.h"
+#include "../oth/Texture.h"
 
-struct ShaderProgramSource {
-    std::string VertexSource;
-    std::string FragmentSource;
-};
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_glfw_gl3.h"
 
-static ShaderProgramSource Shader(const std::string& filepath) {
-    std::ifstream stream(filepath);
-
-    enum class ShaderType {
-        NONE = -1,
-        Vertex = 0,
-        Fragment = 1
-    };
-
-    ShaderType currentType = ShaderType::NONE;
-    std::string line;
-    std::stringstream ss[2];
-    while (getline(stream, line))
-    {
-        if (line.find("#shader") != std::string::npos) {
-            if (line.find("vertex") != std::string::npos)
-                currentType = ShaderType::Vertex;
-            if (line.find("fragment") != std::string::npos)
-                currentType = ShaderType::Fragment;
-        }
-        else
-            ss[(int)currentType] << line << "\n";
-    }
-
-    return { ss[0].str(), ss[1].str() };
-}
-
-unsigned int CompileShader(const std::string& Source, unsigned int type) {
-
-    unsigned int id = glCreateShader(type);
-    const char* src = Source.c_str();
-    
-    glShaderSource(id, 1, &src, nullptr);
-    glCompileShader(id);
-
-    int result;
-    glGetShaderiv(id, GL_COMPILE_STATUS, &result);
-
-    if (result == GL_FALSE) {
-        int lenght;
-        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &lenght);
-
-        char* message = (char*)alloca(lenght * sizeof(char));
-        glGetShaderInfoLog(id, lenght, &lenght, message);
-
-        std::cout << "Failed to compile" << std::endl << message << std::endl;
-    }
-
-    return id;
-
-
-}
-
-static int CreateShader(const std::string& vertexShader, const std::string& fragmentShader) {
-
-    unsigned int program = glCreateProgram();
-    unsigned int vs = CompileShader(vertexShader, GL_VERTEX_SHADER);
-    unsigned int fs = CompileShader(fragmentShader, GL_FRAGMENT_SHADER);
-
-    glAttachShader(program, vs);
-    glAttachShader(program, fs);
-    glLinkProgram(program);
-    glValidateProgram(program);
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    return program;
-}
+#include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 
 int main(void)
 {
@@ -103,40 +38,91 @@ int main(void)
     if (glewInit() != GLEW_OK)
         std::cout << "!Error!" << std::endl;
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     std::cout << "gl version " << glGetString(GL_VERSION);
     
     //Shader and stuff
-    float positions[6] = {
-        -1.0f,-1.0f,
-         0.0,  1.0,
-         1.0f,-1.0f
+    float positions[] = {
+         0.5f,-0.5f, 1.0f, 0.0f ,
+         0.5,  0.5 , 1.0f, 1.0f ,
+        -0.5f,-0.5f, 0.0f, 0.0f ,
+        -0.5f, 0.5f, 0.0f, 1.0f
     };
 
+    unsigned int indexs[6] = {
+        0, 2, 1,
+        3, 2, 1
+
+    };
+
+    unsigned int vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
     //Vertex buffer
-    unsigned int bufferiD;
-    glGenBuffers(1, &bufferiD);
-    glBindBuffer(GL_ARRAY_BUFFER, bufferiD);
-    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), positions, GL_STATIC_DRAW);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+    VertexArray va;
+    VertexBuffer vb( positions, 4 * 4 * sizeof(float));
 
-    //Shader
+    VerexBufferLayout layout;
+
+    layout.Push<float>(2);
+    layout.Push<float>(2);
+    va.AddBuffer(vb, layout);
+
+    //Index buffer
+    IndexBuffer ib(indexs, 6);
+
+
+    //proj
+    glm::mat4 proj = glm::ortho(-2.0f, 2.0f, -1.5f, 1.5f, -1.0f, 1.0f);
+    glm::mat4 view = glm::translate(glm::mat4(1),glm::vec3(-1.0f, 0, 0));
+    glm::mat4 model = glm::translate(glm::mat4(1), glm::vec3(-0.0f, 0, 0));
+
+    glm::mat4 mvp = model * proj * view;
+
+    Shader shader("res/shaders/Shader.shader");
+    shader.Bind();
+
+    shader.SetUniform4f("u_Color", 0.2f, 0.2f, 1.0f,1.0f);
+    Renderer rnd;
+
+    Texture tex("img/saul.png");
+    tex.Bind(0);
+
+    shader.SetUniform1i("u_Texture", 0);
+    shader.SetUniformMat4f("u_MVP", mvp);
+
     
-    ShaderProgramSource program = Shader("res/shaders/Shader.shader");
+    ImGui::CreateContext();
+    ImGui_ImplGlfwGL3_Init(window, true);
+    ImGui::StyleColorsDark();
 
-    unsigned int shader = CreateShader(program.VertexSource, program.FragmentSource);
-    glUseProgram(shader);
+    bool show_demo_window = true;
+    bool show_another_window = false;
+    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     /* Loop until the user closes the window */
     while (!glfwWindowShouldClose(window))
     {
         /* Render here */
-        glClear(GL_COLOR_BUFFER_BIT);
+        rnd.Clear();
 
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        ImGui_ImplGlfwGL3_NewFrame();
+        rnd.Draw(va, ib, shader);
 
-        /* Swap front and back buffers */
+        ImGui::Text("Hello, world!");                           // Edit 1 float using a slider from 0.0f to 1.0f    
+        ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
+
+        ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our windows open/close state
+        ImGui::Checkbox("Another Window", &show_another_window);
+
+        ImGui::Render();
+        ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
+
+        /* Swap front and back buffers */   
         glfwSwapBuffers(window);
 
         /* Poll for and process events */
